@@ -66,6 +66,12 @@ Each task is a persistent Hermes root session. You talk to it, it works, and the
 
 ## FAQ
 
+**Can tasks use Hermes plugins and skills?**
+Yes. Minions runs normal Hermes sessions, so installed plugins and skills stay
+available to the agent. For example, a research or content task can use
+[Hermes Tweet](https://github.com/Xquik-dev/hermes-tweet) when the local Hermes
+profile has that plugin installed and configured.
+
 **Can I use this with other agents?**
 Not yet. The adapter interface exists, but launch is Hermes-only. OpenClaw is next.
 
