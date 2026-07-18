@@ -876,6 +876,42 @@ def _resolve_toolsets(cfg: dict[str, Any]) -> list[str] | None:
     return None
 
 
+_mcp_servers_registered = False
+
+
+def _register_mcp_servers(cfg: dict[str, Any]) -> None:
+    """Register config.yaml's ``mcp_servers`` into the Hermes tool registry.
+
+    Only the Hermes CLI/web entrypoints do this at startup — nothing in the
+    worker path does — so without it a configured MCP server resolves into the
+    session's toolsets (_resolve_toolsets) yet contributes zero tools to the
+    LLM. A server that connects and later drops is parked and revived by
+    Hermes itself; but if registration RAISES (import failure, endpoint down
+    before any connection — common when the backend sits behind a dev tunnel),
+    nothing inside Hermes will retry it, so we keep the flag unset and try
+    again on the next agent create. register_mcp_servers is idempotent for
+    already-connected servers, so post-success retries would be near-free too.
+    """
+    global _mcp_servers_registered
+    if _mcp_servers_registered:
+        return
+    servers = cfg.get("mcp_servers")
+    if not isinstance(servers, dict) or not servers:
+        return
+    try:
+        from tools.mcp_tool import register_mcp_servers
+
+        register_mcp_servers(servers)
+    except Exception as exc:
+        print(
+            f"[hermes-worker] mcp_servers registration failed (will retry on next agent create): {exc}",
+            file=sys.stderr,
+            flush=True,
+        )
+        return
+    _mcp_servers_registered = True
+
+
 def _normalize_fallback_entry(raw: Any) -> dict[str, Any] | None:
     if not isinstance(raw, dict):
         return None
@@ -931,6 +967,7 @@ def _create_agent(
 ) -> Any:
     _ensure_imports()
     cfg = _load_config()
+    _register_mcp_servers(cfg)
     defaults = _defaults_from_config(cfg)
     resolved_reasoning_effort = reasoning_effort or defaults.get("reasoningEffort")
     resolved_model, resolved_provider, resolved_base_url = _resolve_model_provider(
