@@ -27,7 +27,7 @@
     "start": "NODE_ENV=production node dist/server/server/index.js",
     "prod": "npm run build && npm run start",
     "prepublishOnly": "npm run build",
-    "test": "python3 tests/test_hermes_worker_resolve.py && for test_file in tests/*.test.ts; do TSX_TSCONFIG_PATH=client/tsconfig.json tsx \"$test_file\"; done"
+    "test": "python3 tests/test_hermes_worker_resolve.py && for test_file in tests/*.test.ts; do TSX_TSCONFIG_PATH=client/tsconfig.json tsx \"$test_file\" || exit 1; done"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
