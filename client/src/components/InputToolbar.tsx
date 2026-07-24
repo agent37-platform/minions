@@ -103,9 +103,9 @@ export function ContextRing({ context, onCompact, compacting = false, compactDis
           )}
         </svg>
         <span
-          className={`absolute inset-0 flex items-center justify-center text-[9px] font-semibold tabular-nums leading-none ${colorClass}`}
+          className={`absolute inset-0 flex items-center justify-center text-[9px] font-semibold tabular-nums leading-none tracking-tight ${colorClass}`}
         >
-          {pct}
+          {clampedPct}%
         </span>
       </button>
 
