@@ -31,9 +31,10 @@ npm run dev          # dev mode: tsx watch + Vite dev server on :6969
 npm run build        # production build: server (tsc) + client (vite) + copy .sql/.py assets
 npm run start        # run compiled production build
 npm run prod         # build + run production in one command
+npm test             # Python worker checks + TypeScript component tests
 ```
 
-No test suite or linter is configured.
+No linter is configured.
 
 ## Architecture
 
