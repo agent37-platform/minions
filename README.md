@@ -35,6 +35,77 @@ npm view minionsai version
 
 The Settings page also shows the version of the running Minions server.
 
+## Running as a Service
+
+Minions can be run as a systemd service with Caddy as a reverse proxy for basic auth.
+
+### systemd Service
+
+Create `/etc/systemd/system/minions.service`:
+
+```ini
+[Unit]
+Description=Minions — Kanban board for Hermes Agent
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/node /usr/lib/node_modules/minionsai/bin/minions.mjs
+Restart=on-failure
+RestartSec=5
+Environment=NODE_ENV=production
+# Use a non-standard port so Caddy can proxy the default :6969
+Environment=PORT=6970
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+systemctl daemon-reload && systemctl enable --now minions
+```
+
+### Caddy Reverse Proxy with Basic Auth
+
+Install Caddy and create a Caddyfile:
+
+```bash
+# Generate a bcrypt hash for your password
+caddy hash-password --plaintext 'your-password'
+```
+
+Create `/etc/caddy/minions.env` with the bcrypt hash:
+
+```
+MINIONS_BCRYPT=$2a$14$...
+```
+
+Then `/etc/caddy/Caddyfile`:
+
+```
+:6969 {
+	basicauth {
+		admin {$MINIONS_BCRYPT}
+	}
+	reverse_proxy localhost:6970
+}
+```
+
+Load the env file via a systemd drop-in at `/etc/systemd/system/caddy.service.d/minions-auth.conf`:
+
+```ini
+[Service]
+EnvironmentFile=/etc/caddy/minions.env
+```
+
+```bash
+systemctl daemon-reload && systemctl restart caddy
+```
+
+> **Note:** Caddy 2.6+ requires bcrypt-hashed passwords, not plaintext. The hash must be stored in an env file and referenced as `{$MINIONS_BCRYPT}` to avoid `$` escaping issues in the Caddyfile.
+
 ## Features
 
 - **Kanban board**: see every task at a glance: in progress, in review, done
