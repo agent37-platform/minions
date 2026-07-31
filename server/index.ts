@@ -2,7 +2,7 @@ import 'dotenv/config';
 import './logging.js';
 import './db/index.js';
 import { createServer, type Server } from 'node:http';
-import app, { adapter } from './app.js';
+import app, { adapter, securityConfig } from './app.js';
 import { mountFrontend, type FrontendCleanup } from './frontend.js';
 import { ensureHermesExternalSkillsDir } from './routes/skills.js';
 
@@ -17,6 +17,7 @@ type ShutdownReason = NodeJS.Signals | 'startup-error';
 
 async function listenWithFallback(
   server: Server,
+  host: string,
   startPort: number,
   maxAttempts: number,
 ): Promise<number> {
@@ -34,7 +35,7 @@ async function listenWithFallback(
         };
         server.once('error', onError);
         server.once('listening', onListening);
-        server.listen(tryPort);
+        server.listen(tryPort, host);
       });
       if (tryPort !== startPort) {
         console.warn(`Port ${startPort} was busy — using port ${tryPort} instead.`);
@@ -68,9 +69,17 @@ async function main() {
       error instanceof Error ? error.message : error,
     );
   }
-  const boundPort = await listenWithFallback(httpServer, PORT, PORT_FALLBACK_ATTEMPTS);
+  const boundPort = await listenWithFallback(
+    httpServer,
+    securityConfig.host,
+    PORT,
+    PORT_FALLBACK_ATTEMPTS,
+  );
 
-  console.log(`Hermes Agent Mission Control running on http://localhost:${boundPort}`);
+  console.log(`Hermes Agent Mission Control running on http://${securityConfig.host}:${boundPort}`);
+  if (securityConfig.yoloEnabled) {
+    console.warn('WARNING: MINIONS_YOLO is enabled; Hermes approval checks may be bypassed.');
+  }
 }
 
 function closeHttpServer(): Promise<void> {

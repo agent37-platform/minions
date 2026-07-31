@@ -1694,7 +1694,6 @@ def main() -> int:
     args = parser.parse_args()
 
     os.environ.setdefault("HERMES_QUIET", "1")
-    os.environ.setdefault("HERMES_YOLO_MODE", "1")
 
     if args.self_test:
         return _self_test()

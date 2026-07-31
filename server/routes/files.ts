@@ -18,10 +18,15 @@ import {
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import archiver from 'archiver';
+import { ZipArchive } from 'archiver';
 import multer from 'multer';
 import { Router, type Request, type Response } from 'express';
-import { expandHomePrefix } from '../paths.js';
+import { resolveMinionsWorkspaceDir } from '../paths.js';
+import {
+  resolveExistingSandboxPath,
+  resolveSandboxDestination,
+  SandboxPathError,
+} from '../filesystem-sandbox.js';
 import { errorCode, isRecord } from '../errors.js';
 import type {
   FileEntry,
@@ -47,7 +52,9 @@ const HOME = resolve(homedir());
 const TEXT_SAMPLE_BYTES = 8192;
 const MAX_TEXT_FILE_SIZE = 10 * 1024 * 1024;
 const MAX_TEXT_FILE_SIZE_DISPLAY = '10 MiB';
-const DEFAULT_FILE_BROWSER_PATH = '~/.minions/workspace';
+const MAX_UPLOAD_FILE_SIZE = 10 * 1024 * 1024;
+const MAX_UPLOAD_FILES = 10;
+const MAX_UPLOAD_TOTAL_SIZE = 100 * 1024 * 1024;
 const UPLOAD_TMP_DIR = join(tmpdir(), 'minions-uploads');
 
 mkdirSync(UPLOAD_TMP_DIR, { recursive: true });
@@ -59,6 +66,12 @@ const uploadMiddleware = multer({
       callback(null, `${Date.now()}-${randomUUID()}-${basename(file.originalname)}`);
     },
   }),
+  limits: {
+    fileSize: MAX_UPLOAD_FILE_SIZE,
+    files: MAX_UPLOAD_FILES,
+    fields: MAX_UPLOAD_FILES + 5,
+    parts: (MAX_UPLOAD_FILES * 2) + 5,
+  },
 }).array('files');
 
 class FileRouteError extends Error {
@@ -75,7 +88,7 @@ export const filesRouter = Router();
 
 filesRouter.get('/list', async (req, res) => {
   try {
-    const directoryPath = resolveUserPath(req.query.path, DEFAULT_FILE_BROWSER_PATH);
+    const directoryPath = await resolveWorkspacePath(req.query.path, true);
     const directoryStats = await stat(directoryPath);
 
     if (!directoryStats.isDirectory()) {
@@ -90,10 +103,11 @@ filesRouter.get('/list', async (req, res) => {
     entries.sort(compareEntries);
 
     const parentPath = dirname(directoryPath);
+    const workspaceRoot = await resolveExistingSandboxPath(resolveMinionsWorkspaceDir(), '.', true);
     res.json({
       path: directoryPath,
       displayPath: displayPath(directoryPath),
-      parentPath: parentPath === directoryPath ? null : parentPath,
+      parentPath: directoryPath === workspaceRoot ? null : parentPath,
       entries,
     });
   } catch (error) {
@@ -103,7 +117,7 @@ filesRouter.get('/list', async (req, res) => {
 
 filesRouter.get('/read', async (req, res) => {
   try {
-    const filePath = resolveRequiredPath(req.query.path);
+    const filePath = await resolveRequiredPath(req.query.path);
     const fileStats = await stat(filePath);
 
     if (fileStats.isDirectory()) {
@@ -137,7 +151,7 @@ filesRouter.get('/read', async (req, res) => {
 
 filesRouter.get('/download', async (req, res) => {
   try {
-    const targetPath = resolveRequiredPath(req.query.path);
+    const targetPath = await resolveRequiredPath(req.query.path);
     const targetStats = await stat(targetPath);
     const targetName = basename(targetPath) || 'download';
 
@@ -145,7 +159,7 @@ filesRouter.get('/download', async (req, res) => {
       res.attachment(`${targetName}.zip`);
       res.type('application/zip');
 
-      const archive = archiver('zip', { zlib: { level: 6 } });
+      const archive = new ZipArchive({ zlib: { level: 6 } });
       let handledArchiveError = false;
       const handleArchiveError = (archiveError: unknown) => {
         if (handledArchiveError) return;
@@ -175,7 +189,7 @@ filesRouter.get('/download', async (req, res) => {
 filesRouter.put('/write', async (req, res) => {
   try {
     const body = parseWriteRequest(req.body);
-    const filePath = resolveUserPath(body.path);
+    const filePath = await resolveWorkspacePath(body.path);
     const currentStats = await stat(filePath);
 
     if (currentStats.isDirectory()) {
@@ -209,9 +223,9 @@ filesRouter.put('/write', async (req, res) => {
 filesRouter.post('/create', async (req, res) => {
   try {
     const body = parseCreateRequest(req.body);
-    const parentPath = resolveUserPath(body.parentPath);
+    const parentPath = await resolveWorkspacePath(body.parentPath);
     const name = validateFileName(body.name);
-    const targetPath = join(parentPath, name);
+    const targetPath = await resolveSandboxDestination(resolveMinionsWorkspaceDir(), join(parentPath, name));
 
     if (body.type === 'directory') {
       await mkdir(targetPath);
@@ -228,7 +242,9 @@ filesRouter.post('/create', async (req, res) => {
 filesRouter.post('/upload', (req, res) => {
   uploadMiddleware(req, res, (error) => {
     if (error) {
-      sendFileError(res, error, 'Failed to upload files');
+      void cleanupUploadedFiles(req).finally(() => {
+        sendFileError(res, error, 'Failed to upload files');
+      });
       return;
     }
 
@@ -239,9 +255,12 @@ filesRouter.post('/upload', (req, res) => {
 filesRouter.patch('/rename', async (req, res) => {
   try {
     const body = parseRenameRequest(req.body);
-    const sourcePath = resolveUserPath(body.path);
+    const sourcePath = await resolveWorkspacePath(body.path);
     const newName = validateFileName(body.newName);
-    const targetPath = join(dirname(sourcePath), newName);
+    const targetPath = await resolveSandboxDestination(
+      resolveMinionsWorkspaceDir(),
+      join(dirname(sourcePath), newName),
+    );
 
     if (await canAccess(targetPath, constants.F_OK)) {
       throw new FileRouteError(409, 'Target already exists', 'EEXIST');
@@ -257,7 +276,7 @@ filesRouter.patch('/rename', async (req, res) => {
 filesRouter.delete('/', async (req, res) => {
   try {
     const body = parseDeleteRequest(req.body);
-    const targetPath = resolveUserPath(body.path);
+    const targetPath = await resolveWorkspacePath(body.path);
     const targetStats = await lstat(targetPath);
 
     if (targetStats.isDirectory() && !targetStats.isSymbolicLink()) {
@@ -285,18 +304,25 @@ async function handleUploadRequest(req: Request, res: Response): Promise<void> {
     }
 
     const { targetPath, relativePaths } = parseUploadRequest(req.body, uploadedFiles.length);
-    const targetDirectory = resolveUserPath(targetPath);
+    const targetDirectory = await resolveWorkspacePath(targetPath);
     const directoryStats = await stat(targetDirectory);
 
     if (!directoryStats.isDirectory()) {
       throw new FileRouteError(400, 'Upload target is not a directory', 'NOT_DIRECTORY');
+    }
+    const totalUploadSize = uploadedFiles.reduce((total, file) => total + file.size, 0);
+    if (totalUploadSize > MAX_UPLOAD_TOTAL_SIZE) {
+      throw new FileRouteError(413, 'Combined upload size cannot exceed 100 MiB', 'UPLOAD_TOO_LARGE');
     }
 
     const uploadedRootPaths = new Set<string>();
 
     for (const [index, file] of uploadedFiles.entries()) {
       const segments = sanitizeUploadRelativePath(relativePaths[index] ?? file.originalname);
-      const destinationPath = join(targetDirectory, ...segments);
+      const destinationPath = await resolveSandboxDestination(
+        resolveMinionsWorkspaceDir(),
+        join(targetDirectory, ...segments),
+      );
 
       if (!isSameOrChildPath(targetDirectory, destinationPath)) {
         throw new FileRouteError(400, 'Upload path cannot escape the target directory', 'BAD_REQUEST');
@@ -320,8 +346,13 @@ async function handleUploadRequest(req: Request, res: Response): Promise<void> {
   } catch (error) {
     sendFileError(res, error, 'Failed to upload files');
   } finally {
-    await Promise.all(uploadedFiles.map((file) => unlink(file.path).catch(() => undefined)));
+    await cleanupUploadedFiles(req);
   }
+}
+
+async function cleanupUploadedFiles(req: Request): Promise<void> {
+  const uploadedFiles = Array.isArray(req.files) ? req.files : [];
+  await Promise.all(uploadedFiles.map((file) => unlink(file.path).catch(() => undefined)));
 }
 
 function parseWriteRequest(value: unknown): FileWriteRequest {
@@ -394,19 +425,21 @@ function parseDeleteRequest(value: unknown): { path: string; recursive: boolean 
   return { path: value.path, recursive: value.recursive === true };
 }
 
-function resolveRequiredPath(value: unknown): string {
+async function resolveRequiredPath(value: unknown): Promise<string> {
   if (typeof value !== 'string' || value.length === 0) {
     throw new FileRouteError(400, 'Path is required', 'BAD_REQUEST');
   }
-  return resolveUserPath(value);
+  return resolveWorkspacePath(value);
 }
 
-function resolveUserPath(value: unknown, fallback?: string): string {
+async function resolveWorkspacePath(value: unknown, fallbackToRoot = false): Promise<string> {
   if (typeof value !== 'string' || value.length === 0) {
-    if (fallback !== undefined) return resolve(expandHomePrefix(fallback));
+    if (fallbackToRoot) {
+      return resolveExistingSandboxPath(resolveMinionsWorkspaceDir(), '.', true);
+    }
     throw new FileRouteError(400, 'Path is required', 'BAD_REQUEST');
   }
-  return resolve(expandHomePrefix(value));
+  return resolveExistingSandboxPath(resolveMinionsWorkspaceDir(), value, fallbackToRoot);
 }
 
 function validateFileName(value: string): string {
@@ -587,10 +620,20 @@ function sendFileError(res: Response, error: unknown, fallback: string): void {
     res.status(error.status).json({ error: error.message, code: error.code });
     return;
   }
+  if (error instanceof SandboxPathError) {
+    res.status(error.status).json({ error: error.message, code: error.code });
+    return;
+  }
+  if (error instanceof multer.MulterError) {
+    res.status(413).json({ error: 'Upload exceeds the configured limits', code: error.code });
+    return;
+  }
 
   const code = errorCode(error);
   const status = statusForNodeCode(code);
-  const message = error instanceof Error && error.message ? error.message : fallback;
+  const message = status === 500
+    ? fallback
+    : (error instanceof Error && error.message ? error.message : fallback);
   res.status(status).json({ error: message, code });
 }
 

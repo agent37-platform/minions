@@ -2,6 +2,7 @@ import { spawn, execFileSync, type ChildProcessWithoutNullStreams } from 'node:c
 import { existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { createInterface, type Interface } from 'node:readline';
+import type { Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import type {
@@ -18,9 +19,32 @@ import type {
 import type { AgentAdapter, AgentRunOptions, AgentRunSettings, StreamEvent } from './types.js';
 import type { WorkerEvent, WorkerRequest, WorkerResult, WorkerErrorPayload } from './worker-protocol.js';
 import { expandHomePrefix, resolveHermesHome, resolveMinionsWorkspaceDir } from '../paths.js';
+import { loadSecurityConfig } from '../security.js';
 
 const WORKER_READY_TIMEOUT_MS = 10_000;
 const WORKER_INTERRUPT_TIMEOUT_MS = 10_000;
+
+export function buildWorkerEnvironment(baseEnv: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const { yoloEnabled } = loadSecurityConfig(baseEnv);
+  return {
+    ...baseEnv,
+    HERMES_QUIET: '1',
+    HERMES_YOLO_MODE: yoloEnabled ? '1' : '0',
+  };
+}
+
+export function observeWorkerInputErrors(
+  input: Writable,
+  onError: (error: Error) => void,
+): void {
+  input.on('error', (error) => {
+    onError(error instanceof Error ? error : new Error(String(error)));
+  });
+}
+
+export function isActiveWorker<T>(activeWorker: T | null, eventSource: T): boolean {
+  return activeWorker === eventSource;
+}
 
 type WorkerRequestInput = WorkerRequest extends infer Request
   ? Request extends WorkerRequest
@@ -319,11 +343,7 @@ class HermesWorkerClient {
     mkdirSync(workspace, { recursive: true });
     const child = spawn(python, [script], {
       cwd: workspace,
-      env: {
-        ...process.env,
-        HERMES_QUIET: '1',
-        HERMES_YOLO_MODE: '1',
-      },
+      env: buildWorkerEnvironment(),
     });
 
     this.child = child;
@@ -331,9 +351,10 @@ class HermesWorkerClient {
     this.readline = createInterface({ input: child.stdout });
     this.readline.on('line', (line) => this.handleLine(line));
     child.stderr.on('data', (chunk) => process.stderr.write(String(chunk)));
-    child.on('error', (error) => this.handleExit(error));
+    observeWorkerInputErrors(child.stdin, (error) => this.handleExit(child, error));
+    child.on('error', (error) => this.handleExit(child, error));
     child.on('exit', (code, signal) => {
-      this.handleExit(new Error(`Hermes worker exited (${signal ?? code ?? 'unknown'})`));
+      this.handleExit(child, new Error(`Hermes worker exited (${signal ?? code ?? 'unknown'})`));
     });
   }
 
@@ -369,7 +390,9 @@ class HermesWorkerClient {
     }
   }
 
-  private handleExit(error: Error): void {
+  private handleExit(child: ChildProcessWithoutNullStreams, error: Error): void {
+    if (!isActiveWorker(this.child, child)) return;
+
     if (this.readline) {
       this.readline.close();
       this.readline = null;

@@ -237,7 +237,7 @@ export function fetchClawHubSkillScan(slug: string, version?: string | null, own
   return request<ClawHubScanResult>(`/skills/registry/${encodeURIComponent(slug)}/scan${suffix}`);
 }
 
-export const WORKSPACE_ROOT = '~/.minions/workspace';
+export const WORKSPACE_ROOT = '.';
 
 export function listFiles(path = WORKSPACE_ROOT) {
   return request<FileListResponse>(`/files/list?path=${encodeURIComponent(path)}`);
