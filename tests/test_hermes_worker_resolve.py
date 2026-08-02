@@ -66,5 +66,56 @@ class ResolveModelProviderTest(unittest.TestCase):
         self.assertEqual((model, provider), ("anthropic/claude-sonnet-5", "openrouter"))
 
 
+NOUS_WITH_MANAGED_CATALOG_CFG = {
+    "model": {"default": "deepseek/deepseek-v4-flash-0731", "provider": "nous"},
+    "custom_providers": [
+        {
+            "name": "Agent37",
+            "base_url": PROXY_URL,
+            "api_key": "token",
+            "api_mode": "chat_completions",
+            "model": "default",
+            # Hermes' model picker caches the managed catalog back into the
+            # entry; ids collide with models Nous also serves.
+            "models": ["default", "deepseek/deepseek-v4-flash-0731", "anthropic/claude-sonnet-5"],
+        }
+    ],
+}
+
+
+class NonCustomProviderNotHijackedTest(unittest.TestCase):
+    def test_explicit_portal_provider_beats_custom_catalog_collision(self):
+        result = hermes_worker._resolve_model_provider(
+            "deepseek/deepseek-v4-flash-0731",
+            NOUS_WITH_MANAGED_CATALOG_CFG,
+            requested_provider="nous",
+        )
+        self.assertEqual(result, ("deepseek/deepseek-v4-flash-0731", "nous", None))
+
+    def test_config_portal_provider_beats_custom_catalog_collision(self):
+        result = hermes_worker._resolve_model_provider(None, NOUS_WITH_MANAGED_CATALOG_CFG)
+        self.assertEqual(result, ("deepseek/deepseek-v4-flash-0731", "nous", None))
+
+    def test_explicit_custom_provider_still_uses_catalog(self):
+        result = hermes_worker._resolve_model_provider(
+            "deepseek/deepseek-v4-flash-0731",
+            NOUS_WITH_MANAGED_CATALOG_CFG,
+            requested_provider="custom:agent37",
+        )
+        self.assertEqual(
+            result, ("deepseek/deepseek-v4-flash-0731", "custom:agent37", PROXY_URL)
+        )
+
+    def test_no_provider_still_uses_catalog(self):
+        cfg = {
+            "model": {"default": "deepseek/deepseek-v4-flash-0731"},
+            "custom_providers": NOUS_WITH_MANAGED_CATALOG_CFG["custom_providers"],
+        }
+        result = hermes_worker._resolve_model_provider(None, cfg)
+        self.assertEqual(
+            result, ("deepseek/deepseek-v4-flash-0731", "custom:agent37", PROXY_URL)
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

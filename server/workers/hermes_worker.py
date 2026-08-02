@@ -812,14 +812,19 @@ def _resolve_model_provider(
     if not model_id:
         return model_id, config_provider, config_base_url
 
-    for entry in _custom_providers(cfg):
-        if not isinstance(entry, dict):
-            continue
-        name = str(entry.get("name") or "").strip()
-        if not name:
-            continue
-        if model_id in _custom_provider_models(entry):
-            return model_id, f"custom:{name.lower().replace(' ', '-')}", string_or_none(entry.get("base_url"))
+    # Custom-provider catalogs may share model ids with built-in providers
+    # (e.g. the managed Agent37 proxy and Nous both serve deepseek/*). Only
+    # let a catalog match claim the model when no non-custom provider is
+    # already selected, otherwise the user's provider choice silently loses.
+    if not config_provider or config_provider_l.startswith("custom:"):
+        for entry in _custom_providers(cfg):
+            if not isinstance(entry, dict):
+                continue
+            name = str(entry.get("name") or "").strip()
+            if not name:
+                continue
+            if model_id in _custom_provider_models(entry):
+                return model_id, f"custom:{name.lower().replace(' ', '-')}", string_or_none(entry.get("base_url"))
 
     parsed = _parse_provider_model(model_id)
     if parsed:
