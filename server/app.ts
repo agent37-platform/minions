@@ -1,6 +1,6 @@
 import express from 'express';
 import type { NextFunction, Request, Response } from 'express';
-import cors from 'cors';
+
 import { tasksRouter } from './routes/tasks.js';
 import { chatRouter } from './routes/chat.js';
 import { createAgentRouter, createTaskAgentSettingsRouter } from './routes/agent.js';
@@ -11,10 +11,12 @@ import { HermesWorkerAdapter } from './adapters/hermes-worker.js';
 import { initSSE, addClient, sendEvent } from './events.js';
 import { getRunStatuses } from './live-chat.js';
 import { getAppVersion } from './version.js';
+import { createSecurityMiddleware, loadSecurityConfig } from './security.js';
 
 const app = express();
+const securityConfig = loadSecurityConfig();
 
-app.use(cors());
+app.use(createSecurityMiddleware(securityConfig));
 
 const adapter = new HermesWorkerAdapter();
 
@@ -52,5 +54,5 @@ app.use((error: unknown, _req: Request, res: Response, next: NextFunction) => {
   next(error);
 });
 
-export { adapter };
+export { adapter, securityConfig };
 export default app;

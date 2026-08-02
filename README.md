@@ -35,6 +35,41 @@ npm view minionsai version
 
 The Settings page also shows the version of the running Minions server.
 
+## Security defaults
+
+Minions binds to `127.0.0.1` by default. The file browser is confined to
+`MINIONS_HOME/workspace`, uploads are limited, and Hermes YOLO mode is disabled
+unless explicitly enabled.
+
+For password protection on the local UI:
+
+```bash
+MINIONS_AUTH_USERNAME=vhagar \
+MINIONS_AUTH_PASSWORD='use-a-long-random-password' \
+npx minionsai
+```
+
+Remote binding is rejected unless `MINIONS_AUTH_PASSWORD` is set:
+
+```bash
+MINIONS_HOST=0.0.0.0 \
+MINIONS_AUTH_PASSWORD='use-a-long-random-password' \
+MINIONS_CORS_ORIGINS='https://mission.example' \
+npx minionsai
+```
+
+`MINIONS_CORS_ORIGINS` is a comma-separated exact allowlist. Cross-origin
+requests are denied by default. Prefer a private network or authenticated
+reverse proxy instead of exposing Minions directly to the public internet.
+
+To deliberately bypass Hermes approval checks, set `MINIONS_YOLO=true`. YOLO
+with a non-loopback bind is blocked unless `MINIONS_ALLOW_REMOTE_YOLO=true` is
+also set. This override substantially increases risk and should not be used on
+an internet-accessible instance.
+
+See [`docs/SECURITY-HARDENING.md`](docs/SECURITY-HARDENING.md) for the threat
+model, guarantees, and remaining isolation work.
+
 ## Features
 
 - **Kanban board**: see every task at a glance: in progress, in review, done
