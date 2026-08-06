@@ -8,6 +8,7 @@ import {
   open,
   readdir,
   readFile,
+  realpath,
   rename,
   rm,
   rmdir,
@@ -21,7 +22,7 @@ import { randomUUID } from 'node:crypto';
 import archiver from 'archiver';
 import multer from 'multer';
 import { Router, type Request, type Response } from 'express';
-import { expandHomePrefix } from '../paths.js';
+import { expandHomePrefix, resolveMinionsWorkspaceDir } from '../paths.js';
 import { errorCode, isRecord } from '../errors.js';
 import type {
   FileEntry,
@@ -44,6 +45,7 @@ interface FileCreateRequest {
 }
 
 const HOME = resolve(homedir());
+const WORKSPACE_ROOT = resolve(resolveMinionsWorkspaceDir());
 const TEXT_SAMPLE_BYTES = 8192;
 const MAX_TEXT_FILE_SIZE = 10 * 1024 * 1024;
 const MAX_TEXT_FILE_SIZE_DISPLAY = '10 MiB';
@@ -75,7 +77,7 @@ export const filesRouter = Router();
 
 filesRouter.get('/list', async (req, res) => {
   try {
-    const directoryPath = resolveUserPath(req.query.path, DEFAULT_FILE_BROWSER_PATH);
+    const directoryPath = await resolveExistingWorkspacePath(req.query.path, DEFAULT_FILE_BROWSER_PATH);
     const directoryStats = await stat(directoryPath);
 
     if (!directoryStats.isDirectory()) {
@@ -103,7 +105,7 @@ filesRouter.get('/list', async (req, res) => {
 
 filesRouter.get('/read', async (req, res) => {
   try {
-    const filePath = resolveRequiredPath(req.query.path);
+    const filePath = await resolveRequiredExistingPath(req.query.path);
     const fileStats = await stat(filePath);
 
     if (fileStats.isDirectory()) {
@@ -137,7 +139,7 @@ filesRouter.get('/read', async (req, res) => {
 
 filesRouter.get('/download', async (req, res) => {
   try {
-    const targetPath = resolveRequiredPath(req.query.path);
+    const targetPath = await resolveRequiredExistingPath(req.query.path);
     const targetStats = await stat(targetPath);
     const targetName = basename(targetPath) || 'download';
 
@@ -175,7 +177,7 @@ filesRouter.get('/download', async (req, res) => {
 filesRouter.put('/write', async (req, res) => {
   try {
     const body = parseWriteRequest(req.body);
-    const filePath = resolveUserPath(body.path);
+    const filePath = await resolveExistingWorkspacePath(body.path);
     const currentStats = await stat(filePath);
 
     if (currentStats.isDirectory()) {
@@ -209,7 +211,7 @@ filesRouter.put('/write', async (req, res) => {
 filesRouter.post('/create', async (req, res) => {
   try {
     const body = parseCreateRequest(req.body);
-    const parentPath = resolveUserPath(body.parentPath);
+    const parentPath = await resolveExistingWorkspacePath(body.parentPath);
     const name = validateFileName(body.name);
     const targetPath = join(parentPath, name);
 
@@ -239,7 +241,7 @@ filesRouter.post('/upload', (req, res) => {
 filesRouter.patch('/rename', async (req, res) => {
   try {
     const body = parseRenameRequest(req.body);
-    const sourcePath = resolveUserPath(body.path);
+    const sourcePath = await resolveExistingWorkspacePath(body.path);
     const newName = validateFileName(body.newName);
     const targetPath = join(dirname(sourcePath), newName);
 
@@ -257,7 +259,7 @@ filesRouter.patch('/rename', async (req, res) => {
 filesRouter.delete('/', async (req, res) => {
   try {
     const body = parseDeleteRequest(req.body);
-    const targetPath = resolveUserPath(body.path);
+    const targetPath = await resolveExistingWorkspacePath(body.path);
     const targetStats = await lstat(targetPath);
 
     if (targetStats.isDirectory() && !targetStats.isSymbolicLink()) {
@@ -285,7 +287,7 @@ async function handleUploadRequest(req: Request, res: Response): Promise<void> {
     }
 
     const { targetPath, relativePaths } = parseUploadRequest(req.body, uploadedFiles.length);
-    const targetDirectory = resolveUserPath(targetPath);
+    const targetDirectory = await resolveExistingWorkspacePath(targetPath);
     const directoryStats = await stat(targetDirectory);
 
     if (!directoryStats.isDirectory()) {
@@ -304,6 +306,7 @@ async function handleUploadRequest(req: Request, res: Response): Promise<void> {
 
       await assertWritableUploadTarget(destinationPath);
       await mkdir(dirname(destinationPath), { recursive: true });
+      await assertExistingPathInsideWorkspace(dirname(destinationPath));
       try {
         await rename(file.path, destinationPath);
       } catch {
@@ -394,19 +397,36 @@ function parseDeleteRequest(value: unknown): { path: string; recursive: boolean 
   return { path: value.path, recursive: value.recursive === true };
 }
 
-function resolveRequiredPath(value: unknown): string {
+async function resolveRequiredExistingPath(value: unknown): Promise<string> {
   if (typeof value !== 'string' || value.length === 0) {
     throw new FileRouteError(400, 'Path is required', 'BAD_REQUEST');
   }
-  return resolveUserPath(value);
+  return await resolveExistingWorkspacePath(value);
 }
 
 function resolveUserPath(value: unknown, fallback?: string): string {
   if (typeof value !== 'string' || value.length === 0) {
-    if (fallback !== undefined) return resolve(expandHomePrefix(fallback));
+    if (fallback !== undefined) return WORKSPACE_ROOT;
     throw new FileRouteError(400, 'Path is required', 'BAD_REQUEST');
   }
-  return resolve(expandHomePrefix(value));
+  const resolvedPath = resolve(expandHomePrefix(value));
+  if (!isSameOrChildPath(WORKSPACE_ROOT, resolvedPath)) {
+    throw new FileRouteError(403, 'Path is outside the workspace', 'OUTSIDE_WORKSPACE');
+  }
+  return resolvedPath;
+}
+
+async function resolveExistingWorkspacePath(value: unknown, fallback?: string): Promise<string> {
+  return await assertExistingPathInsideWorkspace(resolveUserPath(value, fallback));
+}
+
+async function assertExistingPathInsideWorkspace(targetPath: string): Promise<string> {
+  const realWorkspace = await realpath(WORKSPACE_ROOT);
+  const realTarget = await realpath(targetPath);
+  if (!isSameOrChildPath(realWorkspace, realTarget)) {
+    throw new FileRouteError(403, 'Path is outside the workspace', 'OUTSIDE_WORKSPACE');
+  }
+  return realTarget;
 }
 
 function validateFileName(value: string): string {

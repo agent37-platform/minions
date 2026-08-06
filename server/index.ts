@@ -7,6 +7,7 @@ import { mountFrontend, type FrontendCleanup } from './frontend.js';
 import { ensureHermesExternalSkillsDir } from './routes/skills.js';
 
 const PORT = parseInt(process.env.PORT || '6969', 10);
+const HOST = process.env.HOST || '127.0.0.1';
 const PORT_FALLBACK_ATTEMPTS = 20;
 
 const httpServer = createServer(app);
@@ -34,7 +35,7 @@ async function listenWithFallback(
         };
         server.once('error', onError);
         server.once('listening', onListening);
-        server.listen(tryPort);
+        server.listen(tryPort, HOST);
       });
       if (tryPort !== startPort) {
         console.warn(`Port ${startPort} was busy — using port ${tryPort} instead.`);
@@ -70,7 +71,7 @@ async function main() {
   }
   const boundPort = await listenWithFallback(httpServer, PORT, PORT_FALLBACK_ATTEMPTS);
 
-  console.log(`Hermes Agent Mission Control running on http://localhost:${boundPort}`);
+  console.log(`Hermes Agent Mission Control running on http://${HOST}:${boundPort}`);
 }
 
 function closeHttpServer(): Promise<void> {
