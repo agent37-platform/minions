@@ -13,17 +13,22 @@ const stmtGetTask = db.prepare('SELECT * FROM tasks WHERE id = ?');
 const stmtInsertTask = db.prepare(`
   INSERT INTO tasks (
     id, title, description, status, agent_model, agent_provider, reasoning_effort,
-    created_at, updated_at, last_agent_response_at, last_viewed_at,
+    created_at, updated_at, agent_session_started_at, last_agent_response_at, last_viewed_at,
     last_context_used_tokens, last_context_window_tokens
   )
   VALUES (
     @id, @title, @description, @status, @agent_model, @agent_provider, @reasoning_effort,
-    @created_at, @updated_at, @last_agent_response_at, @last_viewed_at,
+    @created_at, @updated_at, @agent_session_started_at, @last_agent_response_at, @last_viewed_at,
     @last_context_used_tokens, @last_context_window_tokens
   )
 `);
 const stmtDeleteTask = db.prepare('DELETE FROM tasks WHERE id = ?');
 const stmtTouchTask = db.prepare('UPDATE tasks SET updated_at = ? WHERE id = ?');
+const stmtMarkAgentSessionStarted = db.prepare(`
+  UPDATE tasks
+  SET agent_session_started_at = COALESCE(agent_session_started_at, ?)
+  WHERE id = ?
+`);
 const stmtMarkTaskViewed = db.prepare(`
   UPDATE tasks
   SET last_viewed_at = last_agent_response_at
@@ -60,6 +65,7 @@ export function insertTask(task: {
     reasoning_effort: task.reasoning_effort ?? null,
     created_at: now,
     updated_at: now,
+    agent_session_started_at: null,
     last_agent_response_at: task.last_agent_response_at ?? null,
     last_viewed_at: null,
     last_context_used_tokens: null,
@@ -128,6 +134,11 @@ export function updateTask(
 
 export function touchTask(id: string): void {
   stmtTouchTask.run(Date.now(), id);
+}
+
+export function markAgentSessionStarted(id: string): Task | undefined {
+  stmtMarkAgentSessionStarted.run(Date.now(), id);
+  return getTask(id);
 }
 
 export function contextFromTask(task: Task): ContextUsage | null {
