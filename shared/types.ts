@@ -30,6 +30,7 @@ export interface Task {
   reasoning_effort: ReasoningEffort | null;
   created_at: number;
   updated_at: number;
+  agent_session_started_at: number | null;
   last_agent_response_at: number | null;
   last_viewed_at: number | null;
   last_context_used_tokens: number | null;

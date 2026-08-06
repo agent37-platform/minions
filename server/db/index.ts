@@ -26,5 +26,6 @@ function ensureColumn(table: string, column: string, ddl: string): void {
 }
 
 ensureColumn('tasks', 'agent_provider', 'TEXT');
+ensureColumn('tasks', 'agent_session_started_at', 'INTEGER');
 
 export default db;

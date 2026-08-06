@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   reasoning_effort  TEXT,
   created_at        INTEGER NOT NULL,
   updated_at        INTEGER NOT NULL,
+  agent_session_started_at INTEGER,
   last_agent_response_at  INTEGER,
   last_viewed_at    INTEGER,
   last_context_used_tokens   INTEGER,

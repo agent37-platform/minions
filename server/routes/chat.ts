@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { contextFromTask, getTask, updateTask, touchTask, recordAgentResponse } from '../db/queries.js';
+import { contextFromTask, getTask, updateTask, touchTask, recordAgentResponse, markAgentSessionStarted } from '../db/queries.js';
 import { adapter } from '../app.js';
 import { broadcast, initSSE } from '../events.js';
 import {
@@ -30,6 +30,7 @@ import { CHAT_RUN_MODES, MINIONS_GOAL_MAX_TURNS, type ChatRunMode, type CompactR
 export const chatRouter = Router();
 
 function hasNoSession(task: Task): boolean {
+  if (task.agent_session_started_at !== null) return false;
   if (task.last_agent_response_at !== null) return false;
   return getRunStatus(task.id)?.status !== 'streaming';
 }
@@ -329,6 +330,7 @@ chatRouter.post('/:id/messages', async (req, res) => {
       return res.status(503).json({ error: toErrorMessage(error, 'Could not set Hermes goal') });
     }
 
+    markAgentSessionStarted(runTask.id);
     const { snapshot, state } = startGoalRun(runTask.id, sessionId, goalState);
     broadcast({ type: 'task_run_updated', run: state });
     broadcastLive(runTask.id, { type: 'snapshot', run: snapshot });
@@ -337,6 +339,7 @@ chatRouter.post('/:id/messages', async (req, res) => {
     return res.status(202).json({ runId: snapshot.runId });
   }
 
+  markAgentSessionStarted(runTask.id);
   const { snapshot, state } = startRun(runTask.id, sessionId, content);
   broadcast({ type: 'task_run_updated', run: state });
   broadcastLive(runTask.id, { type: 'snapshot', run: snapshot });
