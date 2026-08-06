@@ -14,7 +14,26 @@ import { getAppVersion } from './version.js';
 
 const app = express();
 
-app.use(cors());
+function isAllowedOrigin(origin: string | undefined, host: string | undefined): boolean {
+  if (!origin) return true;
+  if (!host) return false;
+
+  try {
+    const url = new URL(origin);
+    return (url.protocol === 'http:' || url.protocol === 'https:') && url.host === host;
+  } catch {
+    return false;
+  }
+}
+
+app.use((req, res, next) => {
+  const origin = req.get('origin');
+  if (!isAllowedOrigin(origin, req.get('host'))) {
+    res.status(403).json({ error: 'Origin not allowed' });
+    return;
+  }
+  cors({ origin: origin || false })(req, res, next);
+});
 
 const adapter = new HermesWorkerAdapter();
 
