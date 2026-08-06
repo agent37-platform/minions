@@ -75,11 +75,15 @@ function mergeToolProgress(tools: ToolProgressEvent[], event: StreamEvent): void
   tools.push(tool);
 }
 
-function writeEvent(res: Response, event: LiveChatEvent): boolean {
+// A `false` return from res.write() means backpressure, not a dead client, so it
+// must not be used to drop the subscriber: the socket stays open, EventSource
+// never sees an error, and the browser waits forever for a stream that has
+// stopped. Real disconnects arrive on the 'close' handler in subscribe().
+function writeEvent(res: Response, event: LiveChatEvent): void {
   try {
-    return res.write(`data: ${JSON.stringify(event)}\n\n`);
+    res.write(`data: ${JSON.stringify(event)}\n\n`);
   } catch {
-    return false;
+    // Socket already torn down — 'close' has fired or is about to.
   }
 }
 
@@ -305,10 +309,8 @@ export function broadcast(taskId: string, event: LiveChatEvent): void {
   if (!taskSubscribers) return;
 
   for (const subscriber of taskSubscribers) {
-    if (!writeEvent(subscriber, event)) taskSubscribers.delete(subscriber);
+    writeEvent(subscriber, event);
   }
-
-  if (taskSubscribers.size === 0) subscribers.delete(taskId);
 }
 
 export function finishRun(taskId: string, ttlMs: number, runId: string): void {

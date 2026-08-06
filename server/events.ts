@@ -34,12 +34,15 @@ export function addClient(res: Response) {
   startKeepalive();
 }
 
-function writeEvent(res: Response, event: BoardEvent): boolean {
-  const data = `data: ${JSON.stringify(event)}\n\n`;
+// A `false` return from res.write() means backpressure, not a dead client, so it
+// must not be used to drop the client — the board would silently stop updating
+// on a connection that is still open. Real disconnects arrive on the 'close'
+// handler in addClient().
+function writeEvent(res: Response, event: BoardEvent): void {
   try {
-    return res.write(data);
+    res.write(`data: ${JSON.stringify(event)}\n\n`);
   } catch {
-    return false;
+    // Socket already torn down — 'close' has fired or is about to.
   }
 }
 
@@ -48,7 +51,5 @@ export function sendEvent(res: Response, event: BoardEvent): void {
 }
 
 export function broadcast(event: BoardEvent) {
-  for (const client of clients) {
-    if (!writeEvent(client, event)) clients.delete(client);
-  }
+  for (const client of clients) writeEvent(client, event);
 }
