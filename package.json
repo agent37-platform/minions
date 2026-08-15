@@ -1,6 +1,6 @@
 {
   "name": "minionsai",
-  "version": "0.1.26",
+  "version": "0.1.27",
   "description": "Mission Control for Hermes Agent — a Kanban board for autonomous agent tasks",
   "license": "MIT",
   "type": "module",
@@ -14,7 +14,7 @@
     "README.md"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "scripts": {
     "dev": "NODE_ENV=development tsx watch --include='server/workers/**/*.py' server/index.ts",
@@ -38,7 +38,7 @@
     "ag-grid-community": "^33.2.5",
     "ag-grid-react": "^33.2.5",
     "archiver": "^7.0.1",
-    "better-sqlite3": "^11.7.0",
+    "better-sqlite3": "^12.11.1",
     "cors": "^2.8.5",
     "cron-parser": "^5.5.0",
     "dotenv": "^16.4.7",
