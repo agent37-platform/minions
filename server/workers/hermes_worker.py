@@ -17,6 +17,13 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from pathlib import Path
 from typing import Any, Callable
 
+# Hermes's managed Python launcher executes scripts through runpy and only
+# prepends the Hermes checkout to sys.path. Ensure this worker can still import
+# its sibling modules when launched from the Minions workspace.
+_WORKER_DIR = str(Path(__file__).resolve().parent)
+if _WORKER_DIR not in sys.path:
+    sys.path.insert(0, _WORKER_DIR)
+
 # Alias so submodules importing `hermes_worker` see this module even when run as `__main__`.
 sys.modules.setdefault("hermes_worker", sys.modules[__name__])
 

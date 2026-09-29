@@ -56,8 +56,23 @@ function resolveAgentDirFromHermesCli(): string | undefined {
   return undefined;
 }
 
-function resolvePython(): string {
-  if (process.env.HERMES_PYTHON) return expandHomePrefix(process.env.HERMES_PYTHON);
+function resolvePythonRuntime(candidate: string, workerScript: string): string {
+  try {
+    const probe = JSON.parse(execFileSync(candidate, [workerScript, '--self-test'], {
+      encoding: 'utf8',
+    })) as { ok?: boolean; python?: string };
+    const runtime = probe.ok ? probe.python?.trim() : undefined;
+    if (runtime && existsSync(runtime)) return runtime;
+  } catch {
+    // Fall back to the configured executable when self-test discovery fails.
+  }
+  return candidate;
+}
+
+function resolvePython(workerScript: string): string {
+  if (process.env.HERMES_PYTHON) {
+    return resolvePythonRuntime(expandHomePrefix(process.env.HERMES_PYTHON), workerScript);
+  }
 
   const candidates: string[] = [];
   if (process.env.HERMES_AGENT_DIR) {
@@ -66,12 +81,12 @@ function resolvePython(): string {
   candidates.push(join(resolveHermesHome(), 'hermes-agent/venv/bin/python'));
 
   const found = candidates.find((candidate) => existsSync(candidate));
-  if (found) return found;
+  if (found) return resolvePythonRuntime(found, workerScript);
 
   const cliAgentDir = resolveAgentDirFromHermesCli();
   if (cliAgentDir) {
     const venvPython = join(cliAgentDir, 'venv/bin/python');
-    if (existsSync(venvPython)) return venvPython;
+    if (existsSync(venvPython)) return resolvePythonRuntime(venvPython, workerScript);
   }
 
   return 'python3';
@@ -313,8 +328,8 @@ class HermesWorkerClient {
   private ensureStarted(): void {
     if (this.child && !this.child.killed && this.child.exitCode === null) return;
 
-    const python = resolvePython();
     const script = resolveWorkerScript();
+    const python = resolvePython(script);
     const workspace = resolveMinionsWorkspaceDir();
     mkdirSync(workspace, { recursive: true });
     const child = spawn(python, [script], {
