@@ -904,7 +904,10 @@ def _register_mcp_servers(cfg: dict[str, Any]) -> None:
     if not isinstance(servers, dict) or not servers:
         return
     try:
-        from tools.mcp_tool import register_mcp_servers
+        try:
+            from tools.mcp_tool_discovery import register_mcp_servers
+        except ImportError:  # older Hermes keeps it in tools.mcp_tool
+            from tools.mcp_tool import register_mcp_servers
 
         register_mcp_servers(servers)
     except Exception as exc:
